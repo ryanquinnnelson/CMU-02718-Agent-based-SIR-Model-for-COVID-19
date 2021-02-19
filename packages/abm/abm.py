@@ -1,183 +1,210 @@
-import random
+from packages.abm.agent_generator import AgentGenerator
+from packages.abm.agent_mover import AgentMover
 
 
-class Agent:
+class ABM:
     """
-    Defines an Agent's properties and behaviors when interacting with other Agents.
+    Defines the functionality for building and managing an agent-based model which simulates a SRI model over discrete
+    time steps. Also defines functionality for capturing metrics for each time step.
 
     Fields:
 
-        asymptomatic:  True if agent is asymptomatic when infected.
+        agents:          a list of Agents currently alive in the model
 
-        days_infected: How long agent has been infected, if currently infected.
+        counts:          a list of dictionaries, where each dictionary represents the metrics gathered for a single time step
 
+        num_dead:        the number of Agents which have died and have been removed from the model by the current time step
+
+        num_quarantined: the number of Agents which have a quarantine status in the current time step
+
+        num_recovered:   the number of Agents which have a recovered status in the current time step
+
+        num_susceptible: the number of Agents which have a susceptible status in the current time step
+
+       status_colors:    defines the colors used for Agent statuses while debugging
     """
-    statuses = ['R', 'S', 'I', 'Q']  # allowable statuses
-    days_infected = 0
 
-    def __init__(self, position, status, mask, distancing):
+    status_colors = {'R': 'r', 'S': 'b', 'I': 'g', 'Q': 'k', 'D': 'm'}
+
+    def __init__(self, n, m, num_infected, percent_distancing, percent_mask, percent_vaccinated=0.0):
         """
-        Initializes an agent.
-        :param position: Location of the Agent in the world, as defined by (x,y).
-        :param status: The state of the Agent's health. Allowable statuses are:
-            (R) Recovered;
-            (S) Susceptible to Infection;
-            (I) Infected;
-            (Q) Quarantined
-        :param mask: True if agent is wearing a mask.
-        :param distancing: True if agent is physically distancing.
+
+        :param n: the dimension of the square torus grid used to define the world in which Agents move
+        :param m: the number of Agents in the model
+        :param num_infected: the number of Agents which have an infected status upon initialization
+        :param percent_distancing: the percent of Agents which have a quarantine status upon initialization
+        :param percent_mask: the percent of Agents which are masked upon initialization
+        :param percent_vaccinated: the percent of Agents which have a recovered status upon initialization
         """
-        # position (x,y)
-        self.position = position
+        self.n = n
+        self.m = m
 
-        # status
-        if status in self.statuses:
-            self.status = status
-        else:
-            raise ValueError('status: ' + status + ' is not valid.')
+        # validate
+        if m > n * n:
+            raise ValueError('n x n grid cannot hold all agents')
 
-        # possibly asymptomatic if infected
-        if status == 'I':
-            if self.is_asymptomatic():
-                self.asymptomatic = True
-            else:
-                self.asymptomatic = False
-        else:
-            self.asymptomatic = False
+        # generate agents
+        ag = AgentGenerator(self.m, num_infected, percent_distancing, percent_mask, percent_vaccinated)
+        self.agents = ag.generate_agents()
 
-        self.mask = mask
-        self.distancing = distancing
+        # position agents
+        am = AgentMover(self.n)
+        am.position_agents(self.agents)
 
-    def is_event(self, num_event, num_outcomes):
+        # set baseline metrics
+        self.counts = []
+        self.num_recovered = 0
+        self.num_infected = 0
+        self.num_susceptible = 0
+        self.num_dead = 0
+        self.num_quarantine = 0
+
+    def count_baseline_metrics(self):
         """
-        Calculates whether an event has occurred given the assumed likelihood of that event.
-        If an event has a 25% chance, num_event = 1 and num_outcomes = 4.
-        :param num_event: The number of occurrences of an event out of all possible outcomes.
-        :param num_outcomes: The number of possible outcomes.
-        :return: True if event occurs, False otherwise.
+        Counts current values for baseline metrics.
+        :return: None
         """
-        return random.randint(1, num_outcomes) <= num_event
+        for agent in self.agents:
+            if agent.status == 'I':
+                self.num_infected += 1
+            elif agent.status == 'S':
+                self.num_susceptible += 1
+            elif agent.status == 'R':
+                self.num_recovered += 1
+            elif agent.status == 'Q':
+                self.num_quarantine += 1
 
-    def is_infected(self, adjacent_agents):
+    def update_baseline_metrics(self, status_before, status_after):
         """
-        Calculates whether Agent is infected, given a list of adjacent agents. Infection depends on whether
-        an adjacent agent is infected or masked and whether the agent is masked.
-
-        A check is performed separately for each agent adjacent to this agent.
-        :param adjacent_agents:
-        :return: True if the agent is now infected, False otherwise.
+        Given the status before and after an Agent update, modifies the metrics stored in the ABM model as necessary.
+        :param status_before: Agent status before update
+        :param status_after: Agent status after
+        :return: None
         """
-        infected = False
 
-        # perform check for all adjacent agents
-        for adjacent in adjacent_agents:
+        if status_before != status_after:
 
-            # chance of infection if an adjacent agent is infected
-            if adjacent.status == 'I':
+            # remove one from status_before
+            if status_before == 'I':
+                self.num_infected -= 1
+            elif status_before == 'S':
+                self.num_susceptible -= 1
+            elif status_before == 'R':
+                self.num_recovered -= 1
+            elif status_before == 'Q':
+                self.num_quarantine -= 1
 
-                # infection probability depends on mask status of both
-                if self.mask and adjacent.mask:
+            # add one to status_after
+            if status_after == 'I':
+                self.num_infected += 1
+            elif status_after == 'S':
+                self.num_susceptible += 1
+            elif status_after == 'R':
+                self.num_recovered += 1
+            elif status_after == 'Q':
+                self.num_quarantine += 1
 
-                    if self.is_event(1, 10000):  # 0.01% chance
-                        infected = True
+    def remove_agent(self, agent):
+        """
+        Remove agent from simulation if agent has died and increments num_dead by 1.
+        :param agent: Agent that died
+        :return: None
+        """
+        self.agents.remove(agent)
+        self.num_dead += 1
 
-                elif self.mask or adjacent.mask:
+    def add_counts(self):
+        """
+        Generates a dictionary of the current metrics and adds the dictionary to the list of counts.
+        :return: None
+        """
+        counts = {'R': self.num_recovered, 'D': self.num_dead, 'I': self.num_infected, 'S': self.num_susceptible,
+                  'Q': self.num_quarantine}
+        self.counts.append(counts)
 
-                    if self.is_event(1, 100):  # 1% chance
-                        infected = True
+    def get_adj_agents(self, agent):
+        """
+        Determines which Agents are within 1 position of this Agent.
+        :param agent: Agent under consideration
+        :return: List of Agents within 1 position of this Agent
+        """
 
+        nearby = []
+
+        am = AgentMover(self.n)
+        positions = am.get_adj_positions(agent.position)
+
+        for each in self.agents:
+            if each.position in positions:
+                nearby.append(each)  # found one
+
+        return nearby
+
+    def run_simulation(self, num_steps):
+        """
+        Runs simulation for specified number of time steps, recording a metric count after each step.
+
+        :param num_steps: Number of time steps to run the model
+        :return: List of the baseline counts taken at each time step in the model.
+        """
+
+        self.count_baseline_metrics()
+        self.add_counts()
+        am = AgentMover(self.n)
+
+        # update agents and metrics for each time step
+        for t in range(num_steps):
+
+            # update agent properties
+            for agent in self.agents:
+
+                if agent.has_died():
+                    self.remove_agent(agent)
                 else:
+                    adj = self.get_adj_agents(agent)
+                    before = agent.status
+                    agent.update_agent(adj)
+                    after = agent.status
+                    self.update_baseline_metrics(before, after)
 
-                    if self.is_event(1, 4):  # 25% chance
-                        infected = True
+            # move all agents
+            am.move_all_agents(self.agents)
 
-        return infected
+            # capture metrics after every time step
+            self.add_counts()
 
-    def is_asymptomatic(self):
-        """
-        Calculates whether Agent is asymptomatic. Model assumes that Agents have a
-        20% chance of being asymptomatic upon infection.
+        return self.counts
 
-        :return: True if agent is asymptomatic, False otherwise.
+    def run_and_visualize_simulation(self, num_steps):
         """
-        return self.is_event(1, 5)  # 20% chance of being asymptomatic
+        Helper function for debugging. Outputs visualization of the simulation.
 
-    def will_quarantine(self):
-        """
-        Calculates whether Agent will go into Quarantine status.
-        :return: True if the agent has been infected for at least 3 days and is symptomatic, False otherwise.
-        """
-        return self.days_infected > 2 and not self.asymptomatic
-
-    def infection_over(self):
-        """
-        Calculates whether Agent has recovered from infection.
-        :return: True if the agent has been infected for at least 15 days, False otherwise.
-        """
-        return self.days_infected > 14
-
-    def update_status(self, adjacent_agents):
-        """
-        Checks whether modification to the agent's status is needed, and updates the status as necessary.
-        :param adjacent_agents: List of Agents adjacent to this Agent
+        :param num_steps: Number of time steps to run the model
         :return: None
         """
+        import matplotlib.pyplot as plt
+        from IPython.display import display, clear_output
 
-        if self.status == 'S':  # not yet infected
+        fig = plt.figure()
+        ax = fig.add_subplot(1, 1, 1)
 
-            if self.is_infected(adjacent_agents):
-                self.status = 'I'
+        for t in range(num_steps):
+            ax.cla()
 
-        elif self.status == 'I':  # already infected
+            for agent in self.agents:
+                c = self.status_colors[agent.status]
+                m = 'o' if agent.distancing else 's'
 
-            if self.will_quarantine():
-                self.status = 'Q'
+                ax.scatter(agent.position[0], agent.position[1], c=c, marker=m)
 
-            if self.infection_over():
-                self.status = 'R'
+            am = AgentMover(self.n)
+            am.move_all_agents(self.agents)
 
-        elif self.status == 'Q':  # already in quarantine
+            ax.grid(True)
+            ax.set_xticks(list(range(self.n)))
+            ax.set_yticks(list(range(self.n)))
 
-            if self.infection_over():
-                self.status = 'R'
+            display(fig)
+            clear_output(wait=True)
 
-    def update_agent(self, adjacent_agents):
-        """
-        Updates agent metrics based on adjacent agents. Does not update position.
-        :param adjacent_agents: List of Agents adjacent to this Agent.
-        :return: None
-        """
-
-        # update days infected if already infected
-        if self.status == 'I' or self.status == 'Q':
-            self.days_infected += 1  # day passed since infection started
-
-        # update status
-        status_before = self.status
-        self.update_status(adjacent_agents)
-
-        # if now infected, determine if asymptomatic
-        if status_before != 'I' and self.status == 'I':
-            self.asymptomatic = self.is_asymptomatic()
-
-        elif status_before != 'R' and self.status == 'R':
-
-            # reset metrics related to infection
-            self.days_infected = 0
-            self.asymptomatic = False
-
-    def __str__(self):
-        """
-        :return: String representation of Agent.
-        """
-        return 'Agent{' + 'position:' + str(self.position) + ', status:' + str(self.status) + ', mask:' + str(
-            self.mask) + ', distancing:' + str(self.distancing) + ', days_infected:' + str(
-            self.days_infected) + ', asymptomatic:' + str(self.asymptomatic) + '}'
-
-    def has_died(self):
-        """
-        Calculates whether Agent has died. This model assumes Agent has a 0.2% chance of dying during infection.
-        :return: True if agent dies due to infection, False otherwise.
-        """
-        infected = self.status == 'I' or self.status == 'Q'
-        return infected and self.is_event(2, 1000)  # 0.2% chance
+            plt.pause(5)
