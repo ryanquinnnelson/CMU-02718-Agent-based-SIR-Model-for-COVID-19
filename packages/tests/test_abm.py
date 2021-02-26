@@ -176,3 +176,15 @@ def test_run_simulation():
     counts = abm.run_simulation(365)
 
     assert len(counts) == 366  # one additional for initialization
+
+
+def test_run_and_visualize_simulation():
+    n = 25
+    m = 250
+    num_infected = 10
+    percent_distancing = 0.1
+    percent_mask = 0.35
+    percent_vaccinated = 0.1
+    abm = ABM(n, m, num_infected, percent_distancing, percent_mask, percent_vaccinated)
+
+    abm.run_and_visualize_simulation(2)
