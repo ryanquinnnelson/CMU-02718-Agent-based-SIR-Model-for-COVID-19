@@ -1,5 +1,5 @@
 # 02718-HW4
-Fall 2020 - Computational Medicine course project - Agent-Based Model for SARS-CoV-2 Virus Spread
+Fall 2020 - Computational Medicine course project - Agent-Based Model for SARS-CoV-2 Virus Spread (HW4)
 
 ### Summary
 
